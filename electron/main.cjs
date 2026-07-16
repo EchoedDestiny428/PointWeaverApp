@@ -44,7 +44,9 @@ app.whenReady().then(() => {
   // IPC for writing path
   ipcMain.handle('write-path', async (event, dirPath, name, data) => {
     try {
-      if (!fs.existsSync(dirPath)) return { error: 'Directory not found' };
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
       const fullPath = path.join(dirPath, `${name}.json`);
       fs.writeFileSync(fullPath, JSON.stringify(data, null, 2));
       return { success: true };

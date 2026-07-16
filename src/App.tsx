@@ -33,6 +33,8 @@ export default function App() {
   const [paths, setPaths] = useState<{name: string, content: PathDefinition}[]>([]);
   const [currentPathName, setCurrentPathName] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [isCreatingPath, setIsCreatingPath] = useState(false);
+  const [newPathName, setNewPathName] = useState('');
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragMode, setDragMode] = useState<'position' | 'heading' | null>(null);
@@ -303,12 +305,20 @@ export default function App() {
     if (path) setProjectDir(path);
   };
 
-  const createNewPath = () => {
-    const name = prompt("Enter path name:");
-    if (!name) return;
+  const confirmCreatePath = (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) {
+      setIsCreatingPath(false);
+      return;
+    }
+    if (paths.some(p => p.name === name)) {
+      alert("Path already exists!");
+      return;
+    }
     const def = { points: [] };
     setPaths([...paths, { name, content: def }]);
     setCurrentPathName(name);
+    setIsCreatingPath(false);
     if (projectDir) {
       (window as any).electronAPI.writePath(projectDir + '\\src\\main\\deploy\\autonomous', name, def);
     }
@@ -349,8 +359,34 @@ export default function App() {
           <div className="path-list">
             <div className="list-header">
               <h3>Auton Paths</h3>
-              <button className="icon-btn" onClick={createNewPath}>+</button>
+              <button className="icon-btn" onClick={() => { setIsCreatingPath(true); setNewPathName(''); }}>+</button>
             </div>
+            {isCreatingPath && (
+              <div style={{ padding: '0 1rem', marginBottom: '0.5rem' }}>
+                <input 
+                  autoFocus
+                  type="text" 
+                  placeholder="Path Name" 
+                  value={newPathName}
+                  onChange={e => setNewPathName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      confirmCreatePath(newPathName);
+                    } else if (e.key === 'Escape') {
+                      setIsCreatingPath(false);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (newPathName.trim()) {
+                      confirmCreatePath(newPathName);
+                    } else {
+                      setIsCreatingPath(false);
+                    }
+                  }}
+                  style={{ width: '100%', padding: '0.25rem', boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
             <ul>
               {paths.map(p => (
                 <li key={p.name} className={p.name === currentPathName ? 'active' : ''} onClick={() => {setCurrentPathName(p.name); setSelectedIndex(null);}}>
