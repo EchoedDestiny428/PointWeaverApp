@@ -44,9 +44,21 @@ export function usePlayback(currentPath: PathDefinition) {
       let nextHeadingIdx = findNextHeadingIndex(points, prevIdx);
       let groupTotal = groupTotals[prevIdx];
 
+      let loopCount = 0;
+      const MAX_LOOPS = 10000;
+
       while (true) {
+        loopCount++;
+        if (loopCount > MAX_LOOPS) {
+          console.warn("Path simulation infinite loop detected! Breaking early.");
+          break;
+        }
+
         let dist = Math.hypot(targetPoint.x - currX, targetPoint.y - currY);
-        if (dist <= earlyExit) {
+        // Ensure earlyExit is at least 0.01 to prevent floating point overshoots
+        let effectiveEarlyExit = Math.max(0.01, earlyExit);
+        
+        if (dist <= effectiveEarlyExit) {
           if (targetPoint.theta != null) {
             lastTheta = targetPoint.theta;
             currTheta = lastTheta;
@@ -56,7 +68,7 @@ export function usePlayback(currentPath: PathDefinition) {
 
         let speed = dist * PathMoveKp;
         let clampedSpeed = Math.max(minSpeed, Math.min(maxSpeed, speed));
-        if (clampedSpeed < 1e-3) clampedSpeed = 1e-3; // prevent infinite loops
+        if (isNaN(clampedSpeed) || clampedSpeed < 1e-3) clampedSpeed = 1e-3; // prevent infinite loops
 
         let dx = (targetPoint.x - currX) / dist;
         let dy = (targetPoint.y - currY) / dist;
@@ -136,9 +148,8 @@ export function usePlayback(currentPath: PathDefinition) {
       if (playbackState === 'playing') {
         const dt = (time - lastTickRef.current) / 1000;
         playbackTimeRef.current += dt;
-        if (playbackTimeRef.current >= getTotalPathTime()) {
-          setPlaybackState('stopped');
-          playbackTimeRef.current = 0;
+        if (playbackTimeRef.current > getTotalPathTime()) {
+          playbackTimeRef.current = 0; // Loop back to start
         }
       }
       lastTickRef.current = time;

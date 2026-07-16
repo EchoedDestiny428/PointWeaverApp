@@ -18,6 +18,12 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
 }) => {
   if (!currentPathName) return null;
 
+  const parseSafeFloat = (val: string) => {
+    if (!val) return null;
+    const parsed = parseFloat(val);
+    return isNaN(parsed) ? null : parsed;
+  };
+
   if (!selectedPoint) {
     return (
       <div className="properties-panel glass-panel">
@@ -26,17 +32,17 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
         <div className="input-row">
           <div className="input-group">
             <label>Max Speed</label>
-            <input type="number" step="0.5" value={currentPath.params?.maxSpeed ?? ''} placeholder="3.0" onChange={(e) => updatePathParams('maxSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+            <input type="number" step="0.5" value={currentPath.params?.maxSpeed ?? ''} placeholder="3.0" onChange={(e) => updatePathParams('maxSpeed', parseSafeFloat(e.target.value))} />
           </div>
           <div className="input-group">
             <label>Min Speed</label>
-            <input type="number" step="0.5" value={currentPath.params?.minSpeed ?? ''} placeholder="0.0" onChange={(e) => updatePathParams('minSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+            <input type="number" step="0.5" value={currentPath.params?.minSpeed ?? ''} placeholder="0.0" onChange={(e) => updatePathParams('minSpeed', parseSafeFloat(e.target.value))} />
           </div>
         </div>
 
         <div className="input-group">
           <label>Early Exit Range (m)</label>
-          <input type="number" step="0.1" value={currentPath.params?.earlyExitRange ?? ''} placeholder="0.05" onChange={(e) => updatePathParams('earlyExitRange', e.target.value ? parseFloat(e.target.value) : null)} />
+          <input type="number" step="0.1" value={currentPath.params?.earlyExitRange ?? ''} placeholder="0.05" onChange={(e) => updatePathParams('earlyExitRange', parseSafeFloat(e.target.value))} />
         </div>
 
         <div className="input-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
@@ -54,11 +60,11 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
       <div className="input-row">
         <div className="input-group">
           <label>X (m)</label>
-          <input type="number" step="0.1" value={selectedPoint.x} onChange={(e) => updateSelectedPoint('x', parseFloat(e.target.value))} />
+          <input type="number" step="0.1" value={selectedPoint.x} onChange={(e) => updateSelectedPoint('x', parseFloat(e.target.value) || 0)} />
         </div>
         <div className="input-group">
           <label>Y (m)</label>
-          <input type="number" step="0.1" value={selectedPoint.y} onChange={(e) => updateSelectedPoint('y', parseFloat(e.target.value))} />
+          <input type="number" step="0.1" value={selectedPoint.y} onChange={(e) => updateSelectedPoint('y', parseFloat(e.target.value) || 0)} />
         </div>
       </div>
 
@@ -66,7 +72,7 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
         <label>Heading (deg)</label>
         <div className="checkbox-input">
           <input type="checkbox" checked={selectedPoint.theta != null} onChange={(e) => updateSelectedPoint('theta', e.target.checked ? 0 : null)} />
-          <input type="number" step="1" disabled={selectedPoint.theta == null} value={selectedPoint.theta ?? ''} onChange={(e) => updateSelectedPoint('theta', parseFloat(e.target.value))} style={{ flex: 1 }} />
+          <input type="number" step="1" disabled={selectedPoint.theta == null} value={selectedPoint.theta ?? ''} onChange={(e) => updateSelectedPoint('theta', parseFloat(e.target.value) || 0)} style={{ flex: 1 }} />
         </div>
       </div>
 
@@ -81,17 +87,17 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
       <div className="input-row">
         <div className="input-group">
           <label>Max Speed</label>
-          <input type="number" step="0.5" value={selectedPoint.params?.maxSpeed ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('maxSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+          <input type="number" step="0.5" value={selectedPoint.params?.maxSpeed ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('maxSpeed', parseSafeFloat(e.target.value))} />
         </div>
         <div className="input-group">
           <label>Min Speed</label>
-          <input type="number" step="0.5" value={selectedPoint.params?.minSpeed ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('minSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+          <input type="number" step="0.5" value={selectedPoint.params?.minSpeed ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('minSpeed', parseSafeFloat(e.target.value))} />
         </div>
       </div>
 
       <div className="input-group">
         <label>Early Exit Range (m)</label>
-        <input type="number" step="0.1" value={selectedPoint.params?.earlyExitRange ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('earlyExitRange', e.target.value ? parseFloat(e.target.value) : null)} />
+        <input type="number" step="0.1" value={selectedPoint.params?.earlyExitRange ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('earlyExitRange', parseSafeFloat(e.target.value))} />
       </div>
 
       <div className="input-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
