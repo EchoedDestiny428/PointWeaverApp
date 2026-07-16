@@ -6,11 +6,16 @@ export interface PathParams {
   interpolate?: boolean | null;
 }
 
+export interface PathEvent {
+  name: string;
+  fraction: number;
+}
+
 export interface PathPoint {
   x: number;
   y: number;
   theta?: number | null;
-  event?: string | null;
+  events?: PathEvent[] | null;
   params?: PathParams | null;
 }
 

@@ -396,3 +396,75 @@ canvas {
 .placeholder p {
   margin: 0;
 }
+
+/* Event List */
+.event-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  transition: all 0.2s;
+}
+
+.event-item:hover {
+  background: rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.event-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.event-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.event-slider-container input[type="range"] {
+  flex: 1;
+  margin: 0;
+  accent-color: var(--primary);
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.event-slider-container input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.event-slider-container input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+
+.event-fraction-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-warning {
+  font-size: 0.75rem;
+  color: #fbbf24;
+  margin-top: 0.25rem;
+  font-weight: 500;
+}

@@ -77,8 +77,50 @@ export const WaypointProperties: React.FC<WaypointPropertiesProps> = ({
       </div>
 
       <div className="input-group">
-        <label>Event Marker</label>
-        <input type="text" value={selectedPoint.event || ''} placeholder="e.g. shoot" onChange={(e) => updateSelectedPoint('event', e.target.value || null)} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <h4 style={{ margin: 0 }}>Events</h4>
+          <button className="secondary-btn" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', borderRadius: '6px' }} onClick={() => {
+            const newEvents = [...(selectedPoint.events || []), { name: 'new_event', fraction: 0.0 }];
+            updateSelectedPoint('events', newEvents);
+          }}>+ Add Event</button>
+        </div>
+        
+        {(selectedPoint.events || []).map((ev, i) => {
+          const isLastPoint = selectedIndex === (currentPath.points?.length || 0) - 1;
+          return (
+            <div key={i} className="event-item">
+              <div className="event-row">
+                <input type="text" value={ev.name} onChange={(e) => {
+                  const arr = [...selectedPoint.events!];
+                  arr[i].name = e.target.value;
+                  updateSelectedPoint('events', arr);
+                }} placeholder="Event name" />
+                <button className="danger-btn" style={{ margin: 0, padding: '0.5rem 0.75rem' }} onClick={() => {
+                  const arr = [...selectedPoint.events!];
+                  arr.splice(i, 1);
+                  updateSelectedPoint('events', arr.length > 0 ? arr : null);
+                }}>X</button>
+              </div>
+              <div className="event-slider-container">
+                <input 
+                  type="range" 
+                  step="0.01" 
+                  min="0" 
+                  max="1" 
+                  disabled={isLastPoint}
+                  value={isLastPoint ? 0.0 : ev.fraction} 
+                  onChange={(e) => {
+                    const arr = [...selectedPoint.events!];
+                    arr[i].fraction = parseFloat(e.target.value);
+                    updateSelectedPoint('events', arr);
+                  }} 
+                />
+                <span className="event-fraction-label">{Math.round((isLastPoint ? 0 : ev.fraction) * 100)}%</span>
+              </div>
+              {isLastPoint && <span className="event-warning">Last point events fire upon arrival.</span>}
+            </div>
+          )
+        })}
       </div>
 
       <div className="divider"></div>

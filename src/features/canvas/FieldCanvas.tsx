@@ -64,6 +64,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [hoverPos, setHoverPos] = useState<{x: number, y: number} | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -231,6 +232,66 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       ctx.shadowBlur = 0;
     }
 
+    let hoveredEvents: { label: string, x: number, y: number }[] = [];
+    
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (p.events && p.events.length > 0) {
+        for (const ev of p.events) {
+          const frac = (i === points.length - 1) ? 0 : (ev.fraction ?? 0);
+          let eX = p.x;
+          let eY = p.y;
+          if (i < points.length - 1) {
+            const next = points[i+1];
+            eX = p.x + (next.x - p.x) * frac;
+            eY = p.y + (next.y - p.y) * frac;
+          }
+
+          const cx = eX * PIXELS_PER_METER;
+          const cy = eY * PIXELS_PER_METER;
+
+          ctx.fillStyle = '#eab308';
+          ctx.beginPath();
+          ctx.arc(cx, cy, POINT_RADIUS * 0.7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          if (hoverPos) {
+            const dist = Math.hypot(hoverPos.x - eX, hoverPos.y - eY);
+            if (dist < (POINT_RADIUS * 2) / PIXELS_PER_METER) {
+              hoveredEvents.push({ label: ev.name, x: eX, y: eY });
+            }
+          }
+        }
+      }
+    }
+
+    if (hoveredEvents.length > 0) {
+      ctx.save();
+      ctx.scale(1, -1);
+      const tooltipX = hoveredEvents[0].x * PIXELS_PER_METER;
+      const tooltipY = -hoveredEvents[0].y * PIXELS_PER_METER - (POINT_RADIUS * 1.5);
+      
+      const label = hoveredEvents.map(h => h.label).join(', ');
+
+      ctx.font = '14px "Inter", sans-serif';
+      const textMetrics = ctx.measureText(label);
+      const padding = 6;
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.beginPath();
+      ctx.roundRect(tooltipX - textMetrics.width/2 - padding, tooltipY - 20, textMetrics.width + padding*2, 24, 4);
+      ctx.fill();
+      
+      ctx.fillStyle = '#eab308';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, tooltipX, tooltipY - 8);
+      ctx.restore();
+    }
+
     if (playbackState !== 'stopped') {
       const pose = getInterpolatedPose(playbackTimeRef.current);
       if (pose && !isNaN(pose.x) && !isNaN(pose.y) && !isNaN(pose.theta)) {
@@ -276,7 +337,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   }, [
     currentPathName, currentPath, selectedIndex, viewOffset, zoomLevel,
     bgImgObj, bgWidth, bgHeight, bgOffsetX, bgOffsetY, isEditingBg, playbackState, getInterpolatedPose,
-    canvasRef, playbackTimeRef, canvasSize
+    canvasRef, playbackTimeRef, canvasSize, hoverPos
   ]);
 
   useEffect(() => {
@@ -392,6 +453,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    const pos = getMousePos(e);
+    setHoverPos(pos);
+
     if (isPanning) {
       const canvas = canvasRef.current;
       if (!canvas) return;
