@@ -1,26 +1,70 @@
-import { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import './App.css';
-
-interface PathParams {
-  minSpeed?: number | null;
-  maxSpeed?: number | null;
-  earlyExitRange?: number | null;
-  timeout?: number | null;
-  interpolate?: boolean | null;
-}
 
 interface PathPoint {
   x: number;
   y: number;
   theta?: number | null;
   event?: string | null;
-  params?: PathParams | null;
+  params?: {
+    minSpeed?: number | null;
+    maxSpeed?: number | null;
+    earlyExitRange?: number | null;
+    timeout?: number | null;
+    interpolate?: boolean | null;
+  } | null;
 }
 
 interface PathDefinition {
   points: PathPoint[];
-  params?: PathParams | null;
+  params: any | null;
 }
+
+interface SimulatedPose {
+  t: number;
+  x: number;
+  y: number;
+  theta: number;
+}
+
+const smoothstep = (x: number) => x * x * (3 - 2 * x);
+
+const findNextHeadingIndex = (points: PathPoint[], startIndex: number) => {
+  let j = startIndex + 1;
+  while (j < points.length) {
+    if (points[j].theta != null) return j;
+    j++;
+  }
+  return -1;
+};
+
+const computeGroupTotals = (points: PathPoint[]) => {
+  const n = points.length;
+  const groupTotals = new Array(n).fill(NaN);
+  if (n < 2) return groupTotals;
+
+  const prefix = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    prefix[i] = prefix[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+
+  let i = 0;
+  while (i < n) {
+    if (points[i].theta == null) { i++; continue; }
+    let j = i + 1;
+    while (j < n && points[j].theta == null) j++;
+    if (j < n && points[j].theta != null) {
+      const total = prefix[j] - prefix[i];
+      if (total > 1e-9) {
+        for (let k = i; k <= j; k++) groupTotals[k] = total;
+      }
+      i = j;
+    } else {
+      break;
+    }
+  }
+  return groupTotals;
+};
 
 const FIELD_WIDTH = 16.54;
 const FIELD_HEIGHT = 8.21;
@@ -100,91 +144,116 @@ export default function App() {
   const animationRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
 
-  const getTotalPathTime = () => {
+  const computedTrajectory = useMemo(() => {
     const points = currentPath.points || [];
-    let time = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      const dist = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-      const speed = points[i].params?.maxSpeed ?? 3.0;
-      time += dist / speed;
+    const trajectory: SimulatedPose[] = [];
+    if (points.length === 0) return trajectory;
+    
+    let currX = points[0].x;
+    let currY = points[0].y;
+    let currTheta = points[0].theta ?? 0;
+    
+    let t = 0;
+    trajectory.push({ t, x: currX, y: currY, theta: currTheta });
+    
+    if (points.length === 1) return trajectory;
+
+    const groupTotals = computeGroupTotals(points);
+    const dt = 0.02; // 50Hz simulation
+    const PathMoveKp = 1.0;
+    const PathPosTolerance = 0.05;
+    const defaultMaxSpeed = 3.0; // Assume 3m/s default top speed
+
+    let lastTheta = points[0].theta ?? 0;
+
+    for (let i = 1; i < points.length; i++) {
+      const targetPoint = points[i];
+      const maxSpeed = targetPoint.params?.maxSpeed ?? defaultMaxSpeed;
+      const minSpeed = targetPoint.params?.minSpeed ?? 0.0;
+      const earlyExit = targetPoint.params?.earlyExitRange ?? PathPosTolerance;
+      const interpolate = targetPoint.params?.interpolate ?? false;
+
+      let prevIdx = i - 1;
+      let nextHeadingIdx = findNextHeadingIndex(points, prevIdx);
+      let groupTotal = groupTotals[prevIdx];
+
+      while (true) {
+        let dist = Math.hypot(targetPoint.x - currX, targetPoint.y - currY);
+        if (dist <= earlyExit) {
+          if (targetPoint.theta != null) {
+              lastTheta = targetPoint.theta;
+              currTheta = lastTheta;
+          }
+          break;
+        }
+
+        let speed = dist * PathMoveKp;
+        let clampedSpeed = Math.max(minSpeed, Math.min(maxSpeed, speed));
+        if (clampedSpeed < 1e-3) clampedSpeed = 1e-3; // prevent infinite loops
+
+        let dx = (targetPoint.x - currX) / dist;
+        let dy = (targetPoint.y - currY) / dist;
+
+        currX += dx * clampedSpeed * dt;
+        currY += dy * clampedSpeed * dt;
+
+        if (nextHeadingIdx !== -1 && !isNaN(groupTotal) && interpolate) {
+            let targetForDist = points[nextHeadingIdx];
+            let remainingDist = Math.hypot(targetForDist.x - currX, targetForDist.y - currY);
+            let rawProgress = Math.max(0, Math.min(1.0, 1.0 - (remainingDist / groupTotal)));
+            let progress = smoothstep(rawProgress);
+            
+            let t1 = lastTheta;
+            let t2 = targetForDist.theta!;
+            let dTheta = t2 - t1;
+            if (dTheta > 180) dTheta -= 360;
+            if (dTheta < -180) dTheta += 360;
+            currTheta = t1 + dTheta * progress;
+        } else if (targetPoint.theta != null) {
+            currTheta = targetPoint.theta;
+        }
+
+        t += dt;
+        trajectory.push({ t, x: currX, y: currY, theta: currTheta });
+      }
     }
-    return time;
+    
+    return trajectory;
+  }, [currentPath]);
+
+  const getTotalPathTime = () => {
+    if (computedTrajectory.length === 0) return 0;
+    return computedTrajectory[computedTrajectory.length - 1].t;
   };
 
   const getInterpolatedPose = (t: number) => {
-    const points = currentPath.points || [];
-    if (points.length === 0) return null;
-    if (points.length === 1) return { x: points[0].x, y: points[0].y, theta: points[0].theta || 0 };
+    if (computedTrajectory.length === 0) return null;
+    if (t <= computedTrajectory[0].t) return computedTrajectory[0];
+    if (t >= computedTrajectory[computedTrajectory.length - 1].t) return computedTrajectory[computedTrajectory.length - 1];
 
-    let currentTime = 0;
-    let targetX = points[0].x, targetY = points[0].y;
-    let segmentIdx = 0;
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      const speed = p1.params?.maxSpeed ?? 3.0;
-      const segmentTime = dist / speed;
-
-      if (t <= currentTime + segmentTime) {
-        const progress = segmentTime === 0 ? 0 : (t - currentTime) / segmentTime;
-        targetX = p1.x + (p2.x - p1.x) * progress;
-        targetY = p1.y + (p2.y - p1.y) * progress;
-        segmentIdx = i;
-        break;
-      }
-      currentTime += segmentTime;
-      if (i === points.length - 2) {
-        targetX = p2.x; targetY = p2.y;
-        segmentIdx = i;
-      }
+    let low = 0;
+    let high = computedTrajectory.length - 1;
+    while (low <= high) {
+      let mid = Math.floor((low + high) / 2);
+      if (computedTrajectory[mid].t === t) return computedTrajectory[mid];
+      if (computedTrajectory[mid].t < t) low = mid + 1;
+      else high = mid - 1;
     }
 
-    let startThetaIdx = -1;
-    for (let i = segmentIdx; i >= 0; i--) {
-      if (points[i].theta != null) { startThetaIdx = i; break; }
-    }
-    let endThetaIdx = -1;
-    for (let i = segmentIdx + 1; i < points.length; i++) {
-      if (points[i].theta != null) { endThetaIdx = i; break; }
-    }
+    const p1 = computedTrajectory[high];
+    const p2 = computedTrajectory[low];
+    const dt = p2.t - p1.t;
+    const progress = dt === 0 ? 0 : (t - p1.t) / dt;
 
-    let theta = 0;
-    if (startThetaIdx === -1 && endThetaIdx === -1) {
-      theta = 0;
-    } else if (startThetaIdx === -1) {
-      theta = points[endThetaIdx].theta!;
-    } else if (endThetaIdx === -1) {
-      theta = points[startThetaIdx].theta!;
-    } else {
-      let groupTotalDist = 0;
-      for (let i = startThetaIdx; i < endThetaIdx; i++) {
-        groupTotalDist += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-      }
-      let distFromStart = 0;
-      for (let i = startThetaIdx; i < segmentIdx; i++) {
-        distFromStart += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-      }
-      distFromStart += Math.hypot(targetX - points[segmentIdx].x, targetY - points[segmentIdx].y);
+    let dTheta = p2.theta - p1.theta;
+    if (dTheta > 180) dTheta -= 360;
+    if (dTheta < -180) dTheta += 360;
 
-      let rawProgress = groupTotalDist === 0 ? 1.0 : (distFromStart / groupTotalDist);
-      rawProgress = Math.max(0, Math.min(1, rawProgress));
-
-      const smoothstep = (x: number) => x * x * (3 - 2 * x);
-
-      const interpolate = points[startThetaIdx].params?.interpolate ?? false;
-      const progress = interpolate ? smoothstep(rawProgress) : 1.0;
-
-      let t1 = points[startThetaIdx].theta!;
-      let t2 = points[endThetaIdx].theta!;
-      let dTheta = t2 - t1;
-      if (dTheta > 180) dTheta -= 360;
-      if (dTheta < -180) dTheta += 360;
-      theta = t1 + dTheta * progress;
-    }
-
-    return { x: targetX, y: targetY, theta };
+    return {
+      x: p1.x + (p2.x - p1.x) * progress,
+      y: p1.y + (p2.y - p1.y) * progress,
+      theta: p1.theta + dTheta * progress
+    };
   };
 
   const stopPlayback = () => {
