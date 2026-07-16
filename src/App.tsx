@@ -1,23 +1,25 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import './App.css';
 
+interface PathParams {
+  minSpeed?: number | null;
+  maxSpeed?: number | null;
+  earlyExitRange?: number | null;
+  timeout?: number | null;
+  interpolate?: boolean | null;
+}
+
 interface PathPoint {
   x: number;
   y: number;
   theta?: number | null;
   event?: string | null;
-  params?: {
-    minSpeed?: number | null;
-    maxSpeed?: number | null;
-    earlyExitRange?: number | null;
-    timeout?: number | null;
-    interpolate?: boolean | null;
-  } | null;
+  params?: PathParams | null;
 }
 
 interface PathDefinition {
   points: PathPoint[];
-  params: any | null;
+  params: PathParams | null;
 }
 
 interface SimulatedPose {
@@ -102,12 +104,37 @@ export default function App() {
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [bgImgObj, setBgImgObj] = useState<HTMLImageElement | null>(null);
 
+  const [bgWidth, setBgWidth] = useState(FIELD_WIDTH);
+  const [bgHeight, setBgHeight] = useState(FIELD_HEIGHT);
+  const [bgOffsetX, setBgOffsetX] = useState(0);
+  const [bgOffsetY, setBgOffsetY] = useState(0);
+
+  const [isEditingBg, setIsEditingBg] = useState(false);
+  const [bgDragMode, setBgDragMode] = useState<'move' | 'tl' | 'tr' | 'bl' | 'br' | null>(null);
+  const [bgDragStart, setBgDragStart] = useState<{ x: number, y: number, bgX: number, bgY: number, bgW: number, bgH: number } | null>(null);
+
   // Load paths if dir is selected
   useEffect(() => {
     if (projectDir) {
       loadPaths();
       const savedBg = localStorage.getItem(`bg_${projectDir}`);
       if (savedBg) setBgImage(savedBg);
+
+      const savedBgWidth = localStorage.getItem(`bgWidth_${projectDir}`);
+      if (savedBgWidth) setBgWidth(parseFloat(savedBgWidth));
+      else setBgWidth(FIELD_WIDTH);
+
+      const savedBgHeight = localStorage.getItem(`bgHeight_${projectDir}`);
+      if (savedBgHeight) setBgHeight(parseFloat(savedBgHeight));
+      else setBgHeight(FIELD_HEIGHT);
+
+      const savedBgOffsetX = localStorage.getItem(`bgOffsetX_${projectDir}`);
+      if (savedBgOffsetX) setBgOffsetX(parseFloat(savedBgOffsetX));
+      else setBgOffsetX(0);
+
+      const savedBgOffsetY = localStorage.getItem(`bgOffsetY_${projectDir}`);
+      if (savedBgOffsetY) setBgOffsetY(parseFloat(savedBgOffsetY));
+      else setBgOffsetY(0);
     }
   }, [projectDir]);
 
@@ -136,7 +163,7 @@ export default function App() {
 
   useEffect(() => {
     drawCanvas();
-  }, [currentPathName, paths, selectedIndex, viewOffset, zoomLevel, bgImgObj]);
+  }, [currentPathName, paths, selectedIndex, viewOffset, zoomLevel, bgImgObj, bgWidth, bgHeight, bgOffsetX, bgOffsetY, isEditingBg]);
 
   const playbackStateRef = useRef<'stopped' | 'playing' | 'paused'>('stopped');
   const playbackTimeRef = useRef<number>(0);
@@ -148,14 +175,14 @@ export default function App() {
     const points = currentPath.points || [];
     const trajectory: SimulatedPose[] = [];
     if (points.length === 0) return trajectory;
-    
+
     let currX = points[0].x;
     let currY = points[0].y;
     let currTheta = points[0].theta ?? 0;
-    
+
     let t = 0;
     trajectory.push({ t, x: currX, y: currY, theta: currTheta });
-    
+
     if (points.length === 1) return trajectory;
 
     const groupTotals = computeGroupTotals(points);
@@ -168,10 +195,13 @@ export default function App() {
 
     for (let i = 1; i < points.length; i++) {
       const targetPoint = points[i];
-      const maxSpeed = targetPoint.params?.maxSpeed ?? defaultMaxSpeed;
-      const minSpeed = targetPoint.params?.minSpeed ?? 0.0;
-      const earlyExit = targetPoint.params?.earlyExitRange ?? PathPosTolerance;
-      const interpolate = targetPoint.params?.interpolate ?? false;
+      let maxSpeed = targetPoint.params?.maxSpeed ?? currentPath.params?.maxSpeed ?? defaultMaxSpeed;
+      if (isNaN(maxSpeed)) maxSpeed = defaultMaxSpeed;
+      let minSpeed = targetPoint.params?.minSpeed ?? currentPath.params?.minSpeed ?? 0.0;
+      if (isNaN(minSpeed)) minSpeed = 0.0;
+      let earlyExit = targetPoint.params?.earlyExitRange ?? currentPath.params?.earlyExitRange ?? PathPosTolerance;
+      if (isNaN(earlyExit)) earlyExit = PathPosTolerance;
+      const interpolate = targetPoint.params?.interpolate ?? currentPath.params?.interpolate ?? false;
 
       let prevIdx = i - 1;
       let nextHeadingIdx = findNextHeadingIndex(points, prevIdx);
@@ -181,8 +211,8 @@ export default function App() {
         let dist = Math.hypot(targetPoint.x - currX, targetPoint.y - currY);
         if (dist <= earlyExit) {
           if (targetPoint.theta != null) {
-              lastTheta = targetPoint.theta;
-              currTheta = lastTheta;
+            lastTheta = targetPoint.theta;
+            currTheta = lastTheta;
           }
           break;
         }
@@ -198,26 +228,26 @@ export default function App() {
         currY += dy * clampedSpeed * dt;
 
         if (nextHeadingIdx !== -1 && !isNaN(groupTotal) && interpolate) {
-            let targetForDist = points[nextHeadingIdx];
-            let remainingDist = Math.hypot(targetForDist.x - currX, targetForDist.y - currY);
-            let rawProgress = Math.max(0, Math.min(1.0, 1.0 - (remainingDist / groupTotal)));
-            let progress = smoothstep(rawProgress);
-            
-            let t1 = lastTheta;
-            let t2 = targetForDist.theta!;
-            let dTheta = t2 - t1;
-            if (dTheta > 180) dTheta -= 360;
-            if (dTheta < -180) dTheta += 360;
-            currTheta = t1 + dTheta * progress;
+          let targetForDist = points[nextHeadingIdx];
+          let remainingDist = Math.hypot(targetForDist.x - currX, targetForDist.y - currY);
+          let rawProgress = Math.max(0, Math.min(1.0, 1.0 - (remainingDist / groupTotal)));
+          let progress = smoothstep(rawProgress);
+
+          let t1 = lastTheta;
+          let t2 = targetForDist.theta!;
+          let dTheta = t2 - t1;
+          if (dTheta > 180) dTheta -= 360;
+          if (dTheta < -180) dTheta += 360;
+          currTheta = t1 + dTheta * progress;
         } else if (targetPoint.theta != null) {
-            currTheta = targetPoint.theta;
+          currTheta = targetPoint.theta;
         }
 
         t += dt;
         trajectory.push({ t, x: currX, y: currY, theta: currTheta });
       }
     }
-    
+
     return trajectory;
   }, [currentPath]);
 
@@ -477,8 +507,36 @@ export default function App() {
     if (bgImgObj) {
       ctx.save();
       ctx.scale(1, -1);
-      ctx.drawImage(bgImgObj, 0, -FIELD_HEIGHT * PIXELS_PER_METER, FIELD_WIDTH * PIXELS_PER_METER, FIELD_HEIGHT * PIXELS_PER_METER);
+      const drawX = bgOffsetX * PIXELS_PER_METER;
+      const drawY = -(bgOffsetY + bgHeight) * PIXELS_PER_METER;
+      const drawW = bgWidth * PIXELS_PER_METER;
+      const drawH = bgHeight * PIXELS_PER_METER;
+      ctx.drawImage(bgImgObj, drawX, drawY, drawW, drawH);
       ctx.restore();
+
+      if (isEditingBg) {
+        ctx.save();
+        ctx.translate(bgOffsetX * PIXELS_PER_METER, bgOffsetY * PIXELS_PER_METER);
+
+        ctx.strokeStyle = '#f59e0b'; // amber-500
+        ctx.lineWidth = 2 / zoomLevel;
+        ctx.setLineDash([5 / zoomLevel, 5 / zoomLevel]);
+        ctx.strokeRect(0, 0, bgWidth * PIXELS_PER_METER, bgHeight * PIXELS_PER_METER);
+        ctx.setLineDash([]);
+
+        const handleSize = 10 / zoomLevel;
+        ctx.fillStyle = '#f59e0b';
+        const corners = [
+          { x: 0, y: 0 },
+          { x: bgWidth * PIXELS_PER_METER, y: 0 },
+          { x: 0, y: bgHeight * PIXELS_PER_METER },
+          { x: bgWidth * PIXELS_PER_METER, y: bgHeight * PIXELS_PER_METER }
+        ];
+        corners.forEach(c => {
+          ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+        });
+        ctx.restore();
+      }
     }
 
     const minX = -viewOffset.x / (zoomLevel * PIXELS_PER_METER);
@@ -540,12 +598,13 @@ export default function App() {
       const isSelected = i === selectedIndex;
 
       // Draw early exit range
-      if (p.params?.earlyExitRange != null) {
-        ctx.fillStyle = 'rgba(14, 165, 233, 0.1)';
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.3)';
+      const exitRange = p.params?.earlyExitRange ?? currentPath.params?.earlyExitRange;
+      if (exitRange != null) {
+        ctx.fillStyle = isSelected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(63, 63, 70, 0.1)';
+        ctx.strokeStyle = isSelected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(63, 63, 70, 0.3)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(px, py, p.params.earlyExitRange * PIXELS_PER_METER, 0, Math.PI * 2);
+        ctx.arc(px, py, exitRange * PIXELS_PER_METER, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
@@ -590,7 +649,7 @@ export default function App() {
 
     if (playbackStateRef.current !== 'stopped') {
       const pose = getInterpolatedPose(playbackTimeRef.current);
-      if (pose) {
+      if (pose && !isNaN(pose.x) && !isNaN(pose.y) && !isNaN(pose.theta)) {
         ctx.save();
         ctx.translate(pose.x * PIXELS_PER_METER, pose.y * PIXELS_PER_METER);
         ctx.rotate(pose.theta * Math.PI / 180);
@@ -611,7 +670,26 @@ export default function App() {
       }
     }
 
-    ctx.restore();
+    ctx.restore(); // restore from the view offset transform
+
+    // Draw scale UI over everything
+    const scaleWidthMeters = 1.0;
+    const scaleWidthPixels = scaleWidthMeters * PIXELS_PER_METER * zoomLevel;
+    ctx.fillStyle = '#a1a1aa';
+    ctx.strokeStyle = '#a1a1aa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const scaleStartX = 20;
+    const scaleStartY = canvas.height - 20;
+    ctx.moveTo(scaleStartX, scaleStartY - 5);
+    ctx.lineTo(scaleStartX, scaleStartY);
+    ctx.lineTo(scaleStartX + scaleWidthPixels, scaleStartY);
+    ctx.lineTo(scaleStartX + scaleWidthPixels, scaleStartY - 5);
+    ctx.stroke();
+
+    ctx.font = '12px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('1 meter', scaleStartX + scaleWidthPixels / 2, scaleStartY - 8);
   };
 
   const getMousePos = (evt: React.MouseEvent | React.WheelEvent) => {
@@ -633,6 +711,30 @@ export default function App() {
       setIsPanning(true);
       return;
     }
+
+    if (isEditingBg && bgImgObj) {
+      const { x, y } = getMousePos(e);
+      const handleRadius = 10 / (PIXELS_PER_METER * zoomLevel);
+      const checkHandle = (hx: number, hy: number) => Math.hypot(x - hx, y - hy) <= handleRadius;
+
+      if (checkHandle(bgOffsetX, bgOffsetY + bgHeight)) {
+        setBgDragMode('tl'); setBgDragStart({ x, y, bgX: bgOffsetX, bgY: bgOffsetY, bgW: bgWidth, bgH: bgHeight }); return;
+      }
+      if (checkHandle(bgOffsetX + bgWidth, bgOffsetY + bgHeight)) {
+        setBgDragMode('tr'); setBgDragStart({ x, y, bgX: bgOffsetX, bgY: bgOffsetY, bgW: bgWidth, bgH: bgHeight }); return;
+      }
+      if (checkHandle(bgOffsetX, bgOffsetY)) {
+        setBgDragMode('bl'); setBgDragStart({ x, y, bgX: bgOffsetX, bgY: bgOffsetY, bgW: bgWidth, bgH: bgHeight }); return;
+      }
+      if (checkHandle(bgOffsetX + bgWidth, bgOffsetY)) {
+        setBgDragMode('br'); setBgDragStart({ x, y, bgX: bgOffsetX, bgY: bgOffsetY, bgW: bgWidth, bgH: bgHeight }); return;
+      }
+
+      if (x >= bgOffsetX && x <= bgOffsetX + bgWidth && y >= bgOffsetY && y <= bgOffsetY + bgHeight) {
+        setBgDragMode('move'); setBgDragStart({ x, y, bgX: bgOffsetX, bgY: bgOffsetY, bgW: bgWidth, bgH: bgHeight }); return;
+      }
+    }
+
     const { x, y } = getMousePos(e);
 
     const points = currentPath.points || [];
@@ -707,6 +809,50 @@ export default function App() {
       return;
     }
 
+    if (bgDragMode && bgDragStart) {
+      const { x, y } = getMousePos(e);
+      const dx = x - bgDragStart.x;
+      const dy = y - bgDragStart.y;
+
+      if (bgDragMode === 'move') {
+        setBgOffsetX(Number((bgDragStart.bgX + dx).toFixed(2)));
+        setBgOffsetY(Number((bgDragStart.bgY + dy).toFixed(2)));
+      } else if (bgDragMode === 'tr') {
+        const newW = bgDragStart.bgW + dx;
+        const newH = bgDragStart.bgH + dy;
+        if (newW > 0) setBgWidth(Number(newW.toFixed(2)));
+        if (newH > 0) setBgHeight(Number(newH.toFixed(2)));
+      } else if (bgDragMode === 'tl') {
+        const newW = bgDragStart.bgW - dx;
+        const newH = bgDragStart.bgH + dy;
+        if (newW > 0) {
+          setBgWidth(Number(newW.toFixed(2)));
+          setBgOffsetX(Number((bgDragStart.bgX + dx).toFixed(2)));
+        }
+        if (newH > 0) setBgHeight(Number(newH.toFixed(2)));
+      } else if (bgDragMode === 'bl') {
+        const newW = bgDragStart.bgW - dx;
+        const newH = bgDragStart.bgH - dy;
+        if (newW > 0) {
+          setBgWidth(Number(newW.toFixed(2)));
+          setBgOffsetX(Number((bgDragStart.bgX + dx).toFixed(2)));
+        }
+        if (newH > 0) {
+          setBgHeight(Number(newH.toFixed(2)));
+          setBgOffsetY(Number((bgDragStart.bgY + dy).toFixed(2)));
+        }
+      } else if (bgDragMode === 'br') {
+        const newW = bgDragStart.bgW + dx;
+        const newH = bgDragStart.bgH - dy;
+        if (newW > 0) setBgWidth(Number(newW.toFixed(2)));
+        if (newH > 0) {
+          setBgHeight(Number(newH.toFixed(2)));
+          setBgOffsetY(Number((bgDragStart.bgY + dy).toFixed(2)));
+        }
+      }
+      return;
+    }
+
     if (dragMode && selectedIndex !== null) {
       const { x, y } = getMousePos(e);
       const newPoints = [...(currentPath.points || [])];
@@ -728,6 +874,17 @@ export default function App() {
   };
 
   const handleMouseUp = () => {
+    if (bgDragMode) {
+      if (projectDir) {
+        localStorage.setItem(`bgWidth_${projectDir}`, bgWidth.toString());
+        localStorage.setItem(`bgHeight_${projectDir}`, bgHeight.toString());
+        localStorage.setItem(`bgOffsetX_${projectDir}`, bgOffsetX.toString());
+        localStorage.setItem(`bgOffsetY_${projectDir}`, bgOffsetY.toString());
+      }
+      setBgDragMode(null);
+      setBgDragStart(null);
+      return;
+    }
     setDragMode(null);
     setIsPanning(false);
   };
@@ -784,16 +941,50 @@ export default function App() {
     updateLocalPath({ ...currentPath, points: newPoints }, true, forceHistory, actionType || `param_${field}`);
   };
 
+  const updatePathParams = (field: keyof PathParams, value: any, forceHistory = true, actionType: string | null = null) => {
+    const newParams = { ...(currentPath.params || {}), [field]: value };
+    updateLocalPath({ ...currentPath, params: newParams }, true, forceHistory, actionType || `path_param_${field}`);
+  };
+
   const selectFolder = async () => {
     const path = await (window as any).electronAPI.selectDir();
     if (path) setProjectDir(path);
   };
 
+  const updateBgConfig = (key: string, value: number) => {
+    if (!projectDir) return;
+    localStorage.setItem(`${key}_${projectDir}`, value.toString());
+    if (key === 'bgWidth') setBgWidth(value);
+    if (key === 'bgHeight') setBgHeight(value);
+    if (key === 'bgOffsetX') setBgOffsetX(value);
+    if (key === 'bgOffsetY') setBgOffsetY(value);
+  };
+
   const selectBgImage = async () => {
-    const base64 = await (window as any).electronAPI.selectImage();
-    if (base64) {
-      setBgImage(base64);
-      if (projectDir) localStorage.setItem(`bg_${projectDir}`, base64);
+    if ((window as any).electronAPI) {
+      const base64 = await (window as any).electronAPI.selectImage();
+      if (base64) {
+        setBgImage(base64);
+        if (projectDir) localStorage.setItem(`bg_${projectDir}`, base64);
+      }
+    } else {
+      // Browser fallback
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = (e: any) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (re) => {
+            const base64 = re.target?.result as string;
+            setBgImage(base64);
+            if (projectDir) localStorage.setItem(`bg_${projectDir}`, base64);
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+      input.click();
     }
   };
 
@@ -879,6 +1070,25 @@ export default function App() {
 
   const selectedPoint = selectedIndex !== null && currentPath.points && currentPath.points[selectedIndex] ? currentPath.points[selectedIndex] : null;
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (re) => {
+        const base64 = re.target?.result as string;
+        setBgImage(base64);
+        if (projectDir) localStorage.setItem(`bg_${projectDir}`, base64);
+        setIsEditingBg(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <>
       <div className="sidebar">
@@ -897,6 +1107,45 @@ export default function App() {
             </button>
           )}
         </div>
+
+        {projectDir && bgImgObj && (
+          <div className="properties-panel glass-panel" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setIsEditingBg(!isEditingBg)}>
+              <h4 style={{ margin: 0, fontSize: '0.8rem', color: '#a1a1aa' }}>Field Image Settings</h4>
+              <button
+                className={`icon-btn-small ${isEditingBg ? 'active' : ''}`}
+                style={{ background: isEditingBg ? '#f59e0b' : 'transparent', color: isEditingBg ? '#000' : '#a1a1aa', padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                onClick={(e) => { e.stopPropagation(); setIsEditingBg(!isEditingBg); }}
+              >
+                {isEditingBg ? 'Done' : 'Edit'}
+              </button>
+            </div>
+
+            {isEditingBg && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <p style={{ fontSize: '0.7rem', color: '#a1a1aa', margin: '0 0 0.5rem 0' }}>Drag corners on canvas to resize. Drag & drop an image onto the canvas to replace.</p>
+                <div className="input-row" style={{ gap: '0.25rem' }}>
+                  <div className="input-group">
+                    <label style={{ fontSize: '0.7rem' }}>W (m)</label>
+                    <input type="number" step="0.1" value={bgWidth} onChange={(e) => updateBgConfig('bgWidth', parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '0.7rem' }}>H (m)</label>
+                    <input type="number" step="0.1" value={bgHeight} onChange={(e) => updateBgConfig('bgHeight', parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '0.7rem' }}>X (m)</label>
+                    <input type="number" step="0.1" value={bgOffsetX} onChange={(e) => updateBgConfig('bgOffsetX', parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '0.7rem' }}>Y (m)</label>
+                    <input type="number" step="0.1" value={bgOffsetY} onChange={(e) => updateBgConfig('bgOffsetY', parseFloat(e.target.value) || 0)} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {projectDir && (
           <div className="path-list">
@@ -996,6 +1245,33 @@ export default function App() {
           </div>
         )}
 
+        {!selectedPoint && currentPathName && (
+          <div className="properties-panel glass-panel">
+            <h3>Default Params</h3>
+
+            <div className="input-row">
+              <div className="input-group">
+                <label>Max Speed</label>
+                <input type="number" step="0.5" value={currentPath.params?.maxSpeed ?? ''} placeholder="3.0" onChange={(e) => updatePathParams('maxSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+              </div>
+              <div className="input-group">
+                <label>Min Speed</label>
+                <input type="number" step="0.5" value={currentPath.params?.minSpeed ?? ''} placeholder="0.0" onChange={(e) => updatePathParams('minSpeed', e.target.value ? parseFloat(e.target.value) : null)} />
+              </div>
+            </div>
+
+            <div className="input-group">
+              <label>Early Exit Range (m)</label>
+              <input type="number" step="0.1" value={currentPath.params?.earlyExitRange ?? ''} placeholder="0.05" onChange={(e) => updatePathParams('earlyExitRange', e.target.value ? parseFloat(e.target.value) : null)} />
+            </div>
+
+            <div className="input-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <input type="checkbox" id="default-interpolate-checkbox" checked={currentPath.params?.interpolate ?? false} onChange={(e) => updatePathParams('interpolate', e.target.checked)} style={{ width: 'auto' }} />
+              <label htmlFor="default-interpolate-checkbox" style={{ margin: 0, cursor: 'pointer' }}>Interpolate Heading</label>
+            </div>
+          </div>
+        )}
+
         {selectedPoint && (
           <div className="properties-panel glass-panel">
             <h3>Waypoint {selectedIndex}</h3>
@@ -1055,7 +1331,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="canvas-container">
+      <div className="canvas-container" onDragOver={handleDragOver} onDrop={handleDrop}>
         {!projectDir ? (
           <div className="placeholder">
             <h2>Welcome to PointWeaver</h2>
@@ -1076,7 +1352,7 @@ export default function App() {
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
             onWheel={handleWheel}
-            style={{ cursor: dragMode ? 'grabbing' : 'crosshair' }}
+            style={{ cursor: dragMode || bgDragMode ? 'grabbing' : 'crosshair' }}
           />
         )}
       </div>
