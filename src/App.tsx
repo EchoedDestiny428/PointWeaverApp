@@ -28,6 +28,14 @@ const PIXELS_PER_METER = 50;
 const POINT_RADIUS = 12; // Increased size
 const HEADING_LINE_LENGTH = 40; // Increased length
 
+const distToSegmentSquared = (x: number, y: number, x1: number, y1: number, x2: number, y2: number) => {
+  const l2 = (x1 - x2) ** 2 + (y1 - y2) ** 2;
+  if (l2 === 0) return (x - x1) ** 2 + (y - y1) ** 2;
+  let t = ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return (x - (x1 + t * (x2 - x1))) ** 2 + (y - (y1 + t * (y2 - y1))) ** 2;
+};
+
 export default function App() {
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [paths, setPaths] = useState<{ name: string, content: PathDefinition }[]>([]);
@@ -136,6 +144,9 @@ export default function App() {
     });
   };
 
+  const [renamingPathName, setRenamingPathName] = useState<string | null>(null);
+  const [renameInputValue, setRenameInputValue] = useState('');
+
   const saveCurrentPath = async () => {
     if (!projectDir || !currentPathName) return;
     const rawDef = paths.find(p => p.name === currentPathName)?.content;
@@ -153,6 +164,68 @@ export default function App() {
     setDirtyPaths(prev => {
       const nd = new Set(prev);
       nd.delete(currentPathName);
+      return nd;
+    });
+  };
+
+  const startRename = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingPathName(name);
+    setRenameInputValue(name);
+  };
+
+  const confirmRename = async (oldName: string) => {
+    const newName = renameInputValue.trim();
+    if (!newName || newName === oldName) {
+      setRenamingPathName(null);
+      return;
+    }
+    if (paths.some(p => p.name === newName)) {
+      alert("A path with that name already exists!");
+      return;
+    }
+    if (projectDir) {
+      const res = await (window as any).electronAPI.renamePath(projectDir + '\\src\\main\\deploy\\autonomous', oldName, newName);
+      if (res.error) {
+        alert("Failed to rename: " + res.error);
+        return;
+      }
+    }
+    
+    setPaths(paths.map(p => p.name === oldName ? { ...p, name: newName } : p));
+    if (currentPathName === oldName) setCurrentPathName(newName);
+    
+    setDirtyPaths(prev => {
+      const nd = new Set(prev);
+      if (nd.has(oldName)) {
+        nd.delete(oldName);
+        nd.add(newName);
+      }
+      return nd;
+    });
+    setRenamingPathName(null);
+  };
+
+  const deletePath = async (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to delete '${name}.json'? This cannot be undone.`)) return;
+    
+    if (projectDir) {
+      const res = await (window as any).electronAPI.deletePath(projectDir + '\\src\\main\\deploy\\autonomous', name);
+      if (res.error) {
+        alert("Failed to delete: " + res.error);
+        return;
+      }
+    }
+    
+    setPaths(paths.filter(p => p.name !== name));
+    if (currentPathName === name) {
+      setCurrentPathName(paths.find(p => p.name !== name)?.name || null);
+      setSelectedIndex(null);
+    }
+    setDirtyPaths(prev => {
+      const nd = new Set(prev);
+      nd.delete(name);
       return nd;
     });
   };
@@ -314,9 +387,23 @@ export default function App() {
       }
     } else if (e.detail === 2) {
       const newPoints = [...points];
-      newPoints.push({ x: Number(x.toFixed(2)), y: Number(y.toFixed(2)), theta: 0 });
+      
+      let insertIndex = newPoints.length;
+      let minDistanceSq = ((POINT_RADIUS * 3) / PIXELS_PER_METER) ** 2;
+      
+      for (let i = 0; i < newPoints.length - 1; i++) {
+        const p1 = newPoints[i];
+        const p2 = newPoints[i + 1];
+        const dSq = distToSegmentSquared(x, y, p1.x, p1.y, p2.x, p2.y);
+        if (dSq < minDistanceSq) {
+          minDistanceSq = dSq;
+          insertIndex = i + 1;
+        }
+      }
+
+      newPoints.splice(insertIndex, 0, { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)), theta: 0 });
       updateLocalPath({ ...currentPath, points: newPoints }, true, true, 'add');
-      setSelectedIndex(newPoints.length - 1);
+      setSelectedIndex(insertIndex);
     } else {
       setSelectedIndex(null);
     }
@@ -491,9 +578,35 @@ export default function App() {
             <ul>
               {paths.map(p => {
                 const isD = dirtyPaths.has(p.name);
+                if (renamingPathName === p.name) {
+                  return (
+                    <li key={p.name} className="active" style={{ padding: '0.25rem 0.5rem' }}>
+                      <input 
+                        className="rename-input"
+                        autoFocus
+                        type="text" 
+                        value={renameInputValue}
+                        onChange={e => {
+                          e.stopPropagation();
+                          setRenameInputValue(e.target.value);
+                        }}
+                        onKeyDown={e => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') confirmRename(p.name);
+                          else if (e.key === 'Escape') setRenamingPathName(null);
+                        }}
+                      />
+                    </li>
+                  );
+                }
+                
                 return (
-                  <li key={p.name} className={p.name === currentPathName ? 'active' : ''} onClick={() => { setCurrentPathName(p.name); setSelectedIndex(null); }}>
-                    {p.name}.json {isD && '*'}
+                  <li key={p.name} className={p.name === currentPathName ? 'active' : ''} onClick={() => { setCurrentPathName(p.name); setSelectedIndex(null); }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{p.name}.json {isD && '*'}</span>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <button className="icon-btn-small" onClick={(e) => startRename(p.name, e)}>✎</button>
+                      <button className="icon-btn-small" onClick={(e) => deletePath(p.name, e)}>✖</button>
+                    </div>
                   </li>
                 );
               })}

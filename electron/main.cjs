@@ -55,6 +55,34 @@ app.whenReady().then(() => {
     }
   });
 
+  // IPC for renaming path
+  ipcMain.handle('rename-path', async (event, dirPath, oldName, newName) => {
+    try {
+      const oldPath = path.join(dirPath, `${oldName}.json`);
+      const newPath = path.join(dirPath, `${newName}.json`);
+      if (fs.existsSync(newPath)) {
+        return { error: 'A path with that name already exists.' };
+      }
+      fs.renameSync(oldPath, newPath);
+      return { success: true };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
+  // IPC for deleting path
+  ipcMain.handle('delete-path', async (event, dirPath, name) => {
+    try {
+      const fullPath = path.join(dirPath, `${name}.json`);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+      return { success: true };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
   // Open directory dialog
   ipcMain.handle('select-dir', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {

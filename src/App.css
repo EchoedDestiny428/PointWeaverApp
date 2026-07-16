@@ -164,6 +164,29 @@ button.danger-btn:hover {
   background: rgba(14, 165, 233, 0.1);
 }
 
+.icon-btn-small {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+
+.icon-btn-small:hover {
+  opacity: 1;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .path-list ul {
   list-style: none;
   padding: 0;
@@ -278,6 +301,25 @@ button.danger-btn:hover {
 .input-group input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.rename-input {
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--primary);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.rename-input:focus {
+  background-color: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 2px var(--primary-glow);
 }
 
 .checkbox-input {
