@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { FIELD_WIDTH, FIELD_HEIGHT, PIXELS_PER_METER, POINT_RADIUS, HEADING_LINE_LENGTH } from '../../constants';
 import type { PathDefinition, PathPoint, SimulatedPose } from '../../types';
 import { distToSegmentSquared } from '../../utils/math';
@@ -62,6 +62,23 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   updateLocalPath, pushToHistory, setBgOffsetX, setBgOffsetY, setBgWidth, setBgHeight,
   updateSelectedPoint, getInterpolatedPose, handleDrop, handleDragOver, drawCanvasRef
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        setCanvasSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height
+        });
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -259,7 +276,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   }, [
     currentPathName, currentPath, selectedIndex, viewOffset, zoomLevel,
     bgImgObj, bgWidth, bgHeight, bgOffsetX, bgOffsetY, isEditingBg, playbackState, getInterpolatedPose,
-    canvasRef, playbackTimeRef
+    canvasRef, playbackTimeRef, canvasSize
   ]);
 
   useEffect(() => {
@@ -500,7 +517,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   };
 
   return (
-    <div className="canvas-container" onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className="canvas-container" ref={containerRef} onDragOver={handleDragOver} onDrop={handleDrop}>
       {!projectDir ? (
         <div className="placeholder">
           <h2>Welcome to PointWeaver</h2>
@@ -514,8 +531,8 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       ) : (
         <canvas
           ref={canvasRef}
-          width={FIELD_WIDTH * PIXELS_PER_METER}
-          height={FIELD_HEIGHT * PIXELS_PER_METER}
+          width={canvasSize.width}
+          height={canvasSize.height}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

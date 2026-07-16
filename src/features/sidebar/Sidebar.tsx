@@ -16,6 +16,7 @@ export interface SidebarProps {
   isEditingBg: boolean;
   setIsEditingBg: (val: boolean) => void;
   updateBgConfig: (key: string, value: number) => void;
+  clearBgImage: () => void;
   
   paths: { name: string, content: PathDefinition }[];
   currentPathName: string | null;
@@ -69,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = (props) => {
           isEditingBg={props.isEditingBg}
           setIsEditingBg={props.setIsEditingBg}
           updateBgConfig={props.updateBgConfig}
+          clearBgImage={props.clearBgImage}
         />
       )}
 

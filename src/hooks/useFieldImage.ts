@@ -101,6 +101,13 @@ export function useFieldImage(projectDir: string | null) {
     e.preventDefault();
   };
 
+  const clearBgImage = () => {
+    setBgImage(null);
+    if (projectDir) {
+      localStorage.removeItem(`bg_${projectDir}`);
+    }
+  };
+
   return {
     bgImage, setBgImage,
     bgImgObj, setBgImgObj,
@@ -110,6 +117,7 @@ export function useFieldImage(projectDir: string | null) {
     bgOffsetY, setBgOffsetY,
     isEditingBg, setIsEditingBg,
     updateBgConfig, selectBgImage,
-    handleDrop, handleDragOver
+    handleDrop, handleDragOver,
+    clearBgImage
   };
 }

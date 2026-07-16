@@ -9,10 +9,11 @@ export interface FieldImageSettingsProps {
   isEditingBg: boolean;
   setIsEditingBg: (val: boolean) => void;
   updateBgConfig: (key: string, value: number) => void;
+  clearBgImage: () => void;
 }
 
 export const FieldImageSettings: React.FC<FieldImageSettingsProps> = ({
-  bgWidth, bgHeight, bgOffsetX, bgOffsetY, isEditingBg, setIsEditingBg, updateBgConfig
+  bgWidth, bgHeight, bgOffsetX, bgOffsetY, isEditingBg, setIsEditingBg, updateBgConfig, clearBgImage
 }) => {
   return (
     <div className="properties-panel glass-panel" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
@@ -54,6 +55,13 @@ export const FieldImageSettings: React.FC<FieldImageSettingsProps> = ({
               <input type="number" step="0.1" value={bgOffsetY} onChange={(e) => updateBgConfig('bgOffsetY', parseFloat(e.target.value) || 0)} />
             </div>
           </div>
+          <button 
+            className="secondary-btn" 
+            style={{ width: '100%', marginTop: '0.5rem', borderColor: 'rgba(239, 68, 68, 0.5)', color: '#ef4444' }} 
+            onClick={clearBgImage}
+          >
+            Clear Background Image
+          </button>
         </div>
       )}
     </div>

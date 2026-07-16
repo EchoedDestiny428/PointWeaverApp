@@ -39,7 +39,8 @@ export default function App() {
     bgOffsetY, setBgOffsetY,
     isEditingBg, setIsEditingBg,
     updateBgConfig, selectBgImage,
-    handleDrop, handleDragOver
+    handleDrop, handleDragOver,
+    clearBgImage
   } = useFieldImage(projectDir);
 
   const [dragMode, setDragMode] = useState<'position' | 'heading' | null>(null);
@@ -169,6 +170,7 @@ export default function App() {
         isEditingBg={isEditingBg}
         setIsEditingBg={setIsEditingBg}
         updateBgConfig={updateBgConfig}
+        clearBgImage={clearBgImage}
         paths={paths}
         currentPathName={currentPathName}
         setCurrentPathName={setCurrentPathName}
