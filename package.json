@@ -1,7 +1,9 @@
 {
-  "name": "pointweavereditor",
+  "name": "PointWeaver",
   "private": true,
   "version": "0.0.0",
+  "description": "PointWeaver Path Editor",
+  "author": "lost",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -9,8 +11,20 @@
     "electron": "cross-env NODE_ENV=development electron .",
     "start": "concurrently \"npm run dev\" \"npm run electron\"",
     "build": "tsc -b && vite build",
+    "package": "npm run build && electron-builder",
     "lint": "oxlint",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.pointweaver.editor",
+    "productName": "PointWeaver Editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ]
   },
   "dependencies": {
     "react": "^19.2.7",
@@ -24,6 +38,7 @@
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"

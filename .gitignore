@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Electron Builder Output
+release/
+release-builds/
+*.exe
+*.dmg
+*.AppImage
