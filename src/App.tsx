@@ -1113,8 +1113,14 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setIsEditingBg(!isEditingBg)}>
               <h4 style={{ margin: 0, fontSize: '0.8rem', color: '#a1a1aa' }}>Field Image Settings</h4>
               <button
-                className={`icon-btn-small ${isEditingBg ? 'active' : ''}`}
-                style={{ background: isEditingBg ? '#f59e0b' : 'transparent', color: isEditingBg ? '#000' : '#a1a1aa', padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                className="secondary-btn"
+                style={{ 
+                  padding: '0.3rem 0.75rem', 
+                  fontSize: '0.75rem',
+                  background: isEditingBg ? 'rgba(245, 158, 11, 0.15)' : undefined,
+                  borderColor: isEditingBg ? 'rgba(245, 158, 11, 0.5)' : undefined,
+                  color: isEditingBg ? '#f59e0b' : undefined
+                }}
                 onClick={(e) => { e.stopPropagation(); setIsEditingBg(!isEditingBg); }}
               >
                 {isEditingBg ? 'Done' : 'Edit'}
