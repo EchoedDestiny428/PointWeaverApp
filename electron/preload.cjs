@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writePath: (dirPath, name, data) => ipcRenderer.invoke('write-path', dirPath, name, data),
   renamePath: (dirPath, oldName, newName) => ipcRenderer.invoke('rename-path', dirPath, oldName, newName),
   deletePath: (dirPath, name) => ipcRenderer.invoke('delete-path', dirPath, name),
-  selectDir: () => ipcRenderer.invoke('select-dir')
+  selectDir: () => ipcRenderer.invoke('select-dir'),
+  selectImage: () => ipcRenderer.invoke('select-image')
 });

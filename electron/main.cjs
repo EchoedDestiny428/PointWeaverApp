@@ -94,6 +94,26 @@ app.whenReady().then(() => {
     return null;
   });
 
+  // Open image dialog
+  ipcMain.handle('select-image', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Images', extensions: ['jpg', 'png', 'jpeg'] }
+      ]
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      // Return file path, which we can load in renderer using a file:// protocol if webSecurity is disabled,
+      // or we can read it and return a base64 string. Returning base64 string is safer.
+      const filePath = result.filePaths[0];
+      const ext = path.extname(filePath).toLowerCase();
+      const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+      const buffer = fs.readFileSync(filePath);
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    }
+    return null;
+  });
+
   createWindow();
 
   app.on('activate', function () {

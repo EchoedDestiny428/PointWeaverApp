@@ -51,12 +51,31 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragMode, setDragMode] = useState<'position' | 'heading' | null>(null);
 
+  const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgImgObj, setBgImgObj] = useState<HTMLImageElement | null>(null);
+
   // Load paths if dir is selected
   useEffect(() => {
     if (projectDir) {
       loadPaths();
+      const savedBg = localStorage.getItem(`bg_${projectDir}`);
+      if (savedBg) setBgImage(savedBg);
     }
   }, [projectDir]);
+
+  useEffect(() => {
+    if (bgImage) {
+      const img = new Image();
+      img.src = bgImage;
+      img.onload = () => setBgImgObj(img);
+    } else {
+      setBgImgObj(null);
+    }
+  }, [bgImage]);
 
   const loadPaths = async () => {
     const res = await (window as any).electronAPI.readPaths(projectDir + '\\src\\main\\deploy\\autonomous');
@@ -73,14 +92,154 @@ export default function App() {
 
   useEffect(() => {
     drawCanvas();
-  }, [currentPathName, paths, selectedIndex]);
+  }, [currentPathName, paths, selectedIndex, viewOffset, zoomLevel, bgImgObj]);
+
+  const playbackStateRef = useRef<'stopped' | 'playing' | 'paused'>('stopped');
+  const playbackTimeRef = useRef<number>(0);
+  const [playbackState, setPlaybackState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
+  const animationRef = useRef<number | null>(null);
+  const lastTickRef = useRef<number>(0);
+
+  const getTotalPathTime = () => {
+    const points = currentPath.points || [];
+    let time = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const dist = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+      const speed = points[i].params?.maxSpeed ?? 3.0;
+      time += dist / speed;
+    }
+    return time;
+  };
+
+  const getInterpolatedPose = (t: number) => {
+    const points = currentPath.points || [];
+    if (points.length === 0) return null;
+    if (points.length === 1) return { x: points[0].x, y: points[0].y, theta: points[0].theta || 0 };
+
+    let currentTime = 0;
+    let targetX = points[0].x, targetY = points[0].y;
+    let segmentIdx = 0;
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const speed = p1.params?.maxSpeed ?? 3.0;
+      const segmentTime = dist / speed;
+
+      if (t <= currentTime + segmentTime) {
+        const progress = segmentTime === 0 ? 0 : (t - currentTime) / segmentTime;
+        targetX = p1.x + (p2.x - p1.x) * progress;
+        targetY = p1.y + (p2.y - p1.y) * progress;
+        segmentIdx = i;
+        break;
+      }
+      currentTime += segmentTime;
+      if (i === points.length - 2) {
+        targetX = p2.x; targetY = p2.y;
+        segmentIdx = i;
+      }
+    }
+
+    let startThetaIdx = -1;
+    for (let i = segmentIdx; i >= 0; i--) {
+      if (points[i].theta != null) { startThetaIdx = i; break; }
+    }
+    let endThetaIdx = -1;
+    for (let i = segmentIdx + 1; i < points.length; i++) {
+      if (points[i].theta != null) { endThetaIdx = i; break; }
+    }
+
+    let theta = 0;
+    if (startThetaIdx === -1 && endThetaIdx === -1) {
+      theta = 0;
+    } else if (startThetaIdx === -1) {
+      theta = points[endThetaIdx].theta!;
+    } else if (endThetaIdx === -1) {
+      theta = points[startThetaIdx].theta!;
+    } else {
+      let groupTotalDist = 0;
+      for (let i = startThetaIdx; i < endThetaIdx; i++) {
+        groupTotalDist += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+      }
+      let distFromStart = 0;
+      for (let i = startThetaIdx; i < segmentIdx; i++) {
+        distFromStart += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+      }
+      distFromStart += Math.hypot(targetX - points[segmentIdx].x, targetY - points[segmentIdx].y);
+
+      let rawProgress = groupTotalDist === 0 ? 1.0 : (distFromStart / groupTotalDist);
+      rawProgress = Math.max(0, Math.min(1, rawProgress));
+
+      const smoothstep = (x: number) => x * x * (3 - 2 * x);
+
+      const interpolate = points[startThetaIdx].params?.interpolate ?? false;
+      const progress = interpolate ? smoothstep(rawProgress) : 1.0;
+
+      let t1 = points[startThetaIdx].theta!;
+      let t2 = points[endThetaIdx].theta!;
+      let dTheta = t2 - t1;
+      if (dTheta > 180) dTheta -= 360;
+      if (dTheta < -180) dTheta += 360;
+      theta = t1 + dTheta * progress;
+    }
+
+    return { x: targetX, y: targetY, theta };
+  };
+
+  const stopPlayback = () => {
+    setPlaybackState('stopped');
+    playbackStateRef.current = 'stopped';
+    playbackTimeRef.current = 0;
+    drawCanvas();
+  };
+
+  const drawCanvasRef = useRef<() => void>(() => { });
+  const getTotalPathTimeRef = useRef<() => number>(() => 0);
+
+  useEffect(() => {
+    drawCanvasRef.current = drawCanvas;
+    getTotalPathTimeRef.current = getTotalPathTime;
+  }, [drawCanvas, getTotalPathTime]);
+
+  const animationLoop = (time: number) => {
+    if (playbackStateRef.current === 'stopped') {
+      animationRef.current = null;
+      return;
+    }
+    if (playbackStateRef.current === 'playing') {
+      const dt = (time - lastTickRef.current) / 1000;
+      playbackTimeRef.current += dt;
+      if (playbackTimeRef.current > getTotalPathTimeRef.current()) {
+        playbackTimeRef.current = 0; // Loop instead of stop
+      }
+    }
+    lastTickRef.current = time;
+    drawCanvasRef.current();
+    animationRef.current = requestAnimationFrame(animationLoop);
+  };
+
+  const playPause = () => {
+    if (playbackState === 'playing') {
+      setPlaybackState('paused');
+      playbackStateRef.current = 'paused';
+    } else {
+      if (playbackState === 'stopped') playbackTimeRef.current = 0;
+      setPlaybackState('playing');
+      playbackStateRef.current = 'playing';
+      lastTickRef.current = performance.now();
+      if (!animationRef.current) {
+        animationRef.current = requestAnimationFrame(animationLoop);
+      }
+    }
+  };
 
   const lastPushTimeRef = useRef<number>(0);
   const lastActionTypeRef = useRef<string | null>(null);
 
   const pushToHistory = (force = true, actionType: string | null = null) => {
     const now = Date.now();
-    
+
     if (actionType && actionType !== lastActionTypeRef.current) {
       force = true;
     }
@@ -90,7 +249,7 @@ export default function App() {
       lastActionTypeRef.current = actionType;
       return;
     }
-    
+
     lastPushTimeRef.current = now;
     lastActionTypeRef.current = actionType;
 
@@ -105,7 +264,7 @@ export default function App() {
     if (historyPast.length === 0) return;
     const newPast = [...historyPast];
     const lastState = newPast.pop()!;
-    
+
     setHistoryPast(newPast);
     setHistoryFuture([paths, ...historyFuture]);
     setPaths(lastState);
@@ -120,7 +279,7 @@ export default function App() {
     if (historyFuture.length === 0) return;
     const newFuture = [...historyFuture];
     const nextState = newFuture.shift()!;
-    
+
     setHistoryFuture(newFuture);
     setHistoryPast([...historyPast, paths]);
     setPaths(nextState);
@@ -134,7 +293,7 @@ export default function App() {
   const updateLocalPath = (newDef: PathDefinition, pushHistory = true, forceHistory = true, actionType: string | null = null) => {
     if (!currentPathName) return;
     if (pushHistory) pushToHistory(forceHistory, actionType);
-    
+
     const newPaths = paths.map(p => p.name === currentPathName ? { ...p, content: newDef } : p);
     setPaths(newPaths);
     setDirtyPaths(prev => {
@@ -191,10 +350,10 @@ export default function App() {
         return;
       }
     }
-    
+
     setPaths(paths.map(p => p.name === oldName ? { ...p, name: newName } : p));
     if (currentPathName === oldName) setCurrentPathName(newName);
-    
+
     setDirtyPaths(prev => {
       const nd = new Set(prev);
       if (nd.has(oldName)) {
@@ -209,7 +368,7 @@ export default function App() {
   const deletePath = async (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm(`Are you sure you want to delete '${name}.json'? This cannot be undone.`)) return;
-    
+
     if (projectDir) {
       const res = await (window as any).electronAPI.deletePath(projectDir + '\\src\\main\\deploy\\autonomous', name);
       if (res.error) {
@@ -217,7 +376,7 @@ export default function App() {
         return;
       }
     }
-    
+
     setPaths(paths.filter(p => p.name !== name));
     if (currentPathName === name) {
       setCurrentPathName(paths.find(p => p.name !== name)?.name || null);
@@ -230,7 +389,7 @@ export default function App() {
     });
   };
 
-  const drawCanvas = () => {
+  function drawCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -243,26 +402,45 @@ export default function App() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    ctx.translate(0, canvas.height);
-    ctx.scale(1, -1);
+    ctx.translate(viewOffset.x, canvas.height + viewOffset.y);
+    ctx.scale(zoomLevel, -zoomLevel);
+
+    if (bgImgObj) {
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(bgImgObj, 0, -FIELD_HEIGHT * PIXELS_PER_METER, FIELD_WIDTH * PIXELS_PER_METER, FIELD_HEIGHT * PIXELS_PER_METER);
+      ctx.restore();
+    }
+
+    const minX = -viewOffset.x / (zoomLevel * PIXELS_PER_METER);
+    const maxX = (canvas.width - viewOffset.x) / (zoomLevel * PIXELS_PER_METER);
+    const minY = viewOffset.y / (zoomLevel * PIXELS_PER_METER);
+    const maxY = (canvas.height + viewOffset.y) / (zoomLevel * PIXELS_PER_METER);
+
+    const startX = Math.floor(minX);
+    const endX = Math.ceil(maxX);
+    const startY = Math.floor(minY);
+    const endY = Math.ceil(maxY);
 
     // Draw gorgeous neon grid
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
-    for (let x = 0; x <= FIELD_WIDTH; x++) {
-      ctx.beginPath(); ctx.moveTo(x * PIXELS_PER_METER, 0); ctx.lineTo(x * PIXELS_PER_METER, canvas.height); ctx.stroke();
+    for (let x = startX; x <= endX; x++) {
+      ctx.beginPath(); ctx.moveTo(x * PIXELS_PER_METER, startY * PIXELS_PER_METER); ctx.lineTo(x * PIXELS_PER_METER, endY * PIXELS_PER_METER); ctx.stroke();
     }
-    for (let y = 0; y <= FIELD_HEIGHT; y++) {
-      ctx.beginPath(); ctx.moveTo(0, y * PIXELS_PER_METER); ctx.lineTo(canvas.width, y * PIXELS_PER_METER); ctx.stroke();
+    for (let y = startY; y <= endY; y++) {
+      ctx.beginPath(); ctx.moveTo(startX * PIXELS_PER_METER, y * PIXELS_PER_METER); ctx.lineTo(endX * PIXELS_PER_METER, y * PIXELS_PER_METER); ctx.stroke();
     }
     // Draw major grid lines
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.lineWidth = 2;
-    for (let x = 0; x <= FIELD_WIDTH; x += 5) {
-      ctx.beginPath(); ctx.moveTo(x * PIXELS_PER_METER, 0); ctx.lineTo(x * PIXELS_PER_METER, canvas.height); ctx.stroke();
+    for (let x = startX; x <= endX; x++) {
+      if (x % 5 !== 0) continue;
+      ctx.beginPath(); ctx.moveTo(x * PIXELS_PER_METER, startY * PIXELS_PER_METER); ctx.lineTo(x * PIXELS_PER_METER, endY * PIXELS_PER_METER); ctx.stroke();
     }
-    for (let y = 0; y <= FIELD_HEIGHT; y += 5) {
-      ctx.beginPath(); ctx.moveTo(0, y * PIXELS_PER_METER); ctx.lineTo(canvas.width, y * PIXELS_PER_METER); ctx.stroke();
+    for (let y = startY; y <= endY; y++) {
+      if (y % 5 !== 0) continue;
+      ctx.beginPath(); ctx.moveTo(startX * PIXELS_PER_METER, y * PIXELS_PER_METER); ctx.lineTo(endX * PIXELS_PER_METER, y * PIXELS_PER_METER); ctx.stroke();
     }
 
     const points = currentPath.points || [];
@@ -291,6 +469,17 @@ export default function App() {
       const py = p.y * PIXELS_PER_METER;
 
       const isSelected = i === selectedIndex;
+
+      // Draw early exit range
+      if (p.params?.earlyExitRange != null) {
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.1)';
+        ctx.strokeStyle = 'rgba(14, 165, 233, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(px, py, p.params.earlyExitRange * PIXELS_PER_METER, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
 
       // Draw heading indicator first so it sits under the point
       if (p.theta != null) {
@@ -329,6 +518,30 @@ export default function App() {
 
       ctx.shadowBlur = 0;
     }
+
+    if (playbackStateRef.current !== 'stopped') {
+      const pose = getInterpolatedPose(playbackTimeRef.current);
+      if (pose) {
+        ctx.save();
+        ctx.translate(pose.x * PIXELS_PER_METER, pose.y * PIXELS_PER_METER);
+        ctx.rotate(pose.theta * Math.PI / 180);
+
+        const size = 0.8 * PIXELS_PER_METER;
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.4)';
+        ctx.strokeStyle = '#0ea5e9';
+        ctx.lineWidth = 2;
+        ctx.fillRect(-size / 2, -size / 2, size, size);
+        ctx.strokeRect(-size / 2, -size / 2, size, size);
+
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(size / 2, 0);
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     ctx.restore();
   };
 
@@ -336,16 +549,21 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const rawX = (evt.clientX - rect.left) * (canvas.width / rect.width);
+    const rawY = (evt.clientY - rect.top) * (canvas.height / rect.height);
 
-    const x = ((evt.clientX - rect.left) * scaleX) / PIXELS_PER_METER;
-    const y = (canvas.height - ((evt.clientY - rect.top) * scaleY)) / PIXELS_PER_METER;
+    const x = (rawX - viewOffset.x) / (zoomLevel * PIXELS_PER_METER);
+    const y = ((canvas.height - rawY) + viewOffset.y) / (zoomLevel * PIXELS_PER_METER);
     return { x, y };
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!currentPathName) return;
+
+    if (e.button === 1) { // Middle click to pan
+      setIsPanning(true);
+      return;
+    }
     const { x, y } = getMousePos(e);
 
     const points = currentPath.points || [];
@@ -387,10 +605,10 @@ export default function App() {
       }
     } else if (e.detail === 2) {
       const newPoints = [...points];
-      
+
       let insertIndex = newPoints.length;
       let minDistanceSq = ((POINT_RADIUS * 3) / PIXELS_PER_METER) ** 2;
-      
+
       for (let i = 0; i < newPoints.length - 1; i++) {
         const p1 = newPoints[i];
         const p2 = newPoints[i + 1];
@@ -410,12 +628,22 @@ export default function App() {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const dx = e.movementX * (canvas.width / rect.width);
+      const dy = e.movementY * (canvas.height / rect.height);
+      setViewOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      return;
+    }
+
     if (dragMode && selectedIndex !== null) {
       const { x, y } = getMousePos(e);
       const newPoints = [...(currentPath.points || [])];
       // CLONE the point to avoid mutating the history state!
       const p = { ...newPoints[selectedIndex] };
-      
+
       if (dragMode === 'position') {
         p.x = Number(Math.max(0, Math.min(FIELD_WIDTH, x)).toFixed(2));
         p.y = Number(Math.max(0, Math.min(FIELD_HEIGHT, y)).toFixed(2));
@@ -424,27 +652,50 @@ export default function App() {
         deg = Math.round(deg);
         p.theta = deg;
       }
-      
+
       newPoints[selectedIndex] = p;
       updateLocalPath({ ...currentPath, points: newPoints }, false, false, dragMode);
     }
   };
 
-  const handleMouseUp = () => setDragMode(null);
+  const handleMouseUp = () => {
+    setDragMode(null);
+    setIsPanning(false);
+  };
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (selectedIndex === null) return;
-    const p = currentPath.points?.[selectedIndex];
-    if (!p || p.theta == null) return;
-
-    const { x, y } = getMousePos(e);
-    if (Math.hypot(p.x - x, p.y - y) < (POINT_RADIUS * 5) / PIXELS_PER_METER) {
-      let delta = e.deltaY > 0 ? -5 : 5;
-      let newTheta = p.theta + delta;
-      if (newTheta > 180) newTheta -= 360;
-      if (newTheta <= -180) newTheta += 360;
-      updateSelectedPoint('theta', newTheta, false, 'heading_scroll');
+    if (selectedIndex !== null) {
+      const p = currentPath.points?.[selectedIndex];
+      if (p && p.theta != null) {
+        const { x, y } = getMousePos(e);
+        if (Math.hypot(p.x - x, p.y - y) < (POINT_RADIUS * 5) / PIXELS_PER_METER) {
+          let delta = e.deltaY > 0 ? -5 : 5;
+          let newTheta = p.theta + delta;
+          if (newTheta > 180) newTheta -= 360;
+          if (newTheta <= -180) newTheta += 360;
+          updateSelectedPoint('theta', newTheta, false, 'heading_scroll');
+          return;
+        }
+      }
     }
+
+    const zoomSensitivity = 0.001;
+    let newZoom = zoomLevel * Math.exp(-e.deltaY * zoomSensitivity);
+    newZoom = Math.max(0.2, Math.min(newZoom, 5));
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const rawX = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const rawY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const fieldPos = getMousePos(e);
+
+    const newOffsetX = rawX - fieldPos.x * PIXELS_PER_METER * newZoom;
+    const newOffsetY = rawY - canvas.height + fieldPos.y * PIXELS_PER_METER * newZoom;
+
+    setZoomLevel(newZoom);
+    setViewOffset({ x: newOffsetX, y: newOffsetY });
   };
 
   const updateSelectedPoint = (field: keyof PathPoint, value: any, forceHistory = true, actionType: string | null = null) => {
@@ -467,6 +718,34 @@ export default function App() {
   const selectFolder = async () => {
     const path = await (window as any).electronAPI.selectDir();
     if (path) setProjectDir(path);
+  };
+
+  const selectBgImage = async () => {
+    const base64 = await (window as any).electronAPI.selectImage();
+    if (base64) {
+      setBgImage(base64);
+      if (projectDir) localStorage.setItem(`bg_${projectDir}`, base64);
+    }
+  };
+
+  const flipX = () => {
+    if (!currentPathName || !currentPath.points) return;
+    const newPoints = currentPath.points.map(p => ({
+      ...p,
+      x: Number((FIELD_WIDTH - p.x).toFixed(2)),
+      theta: p.theta != null ? ((180 - p.theta + 180) % 360 - 180) : null
+    }));
+    updateLocalPath({ ...currentPath, points: newPoints }, true, true, 'flipX');
+  };
+
+  const flipY = () => {
+    if (!currentPathName || !currentPath.points) return;
+    const newPoints = currentPath.points.map(p => ({
+      ...p,
+      y: Number((FIELD_HEIGHT - p.y).toFixed(2)),
+      theta: p.theta != null ? (p.theta === 0 ? 0 : -p.theta) : null
+    }));
+    updateLocalPath({ ...currentPath, points: newPoints }, true, true, 'flipY');
   };
 
   const confirmCreatePath = (rawName: string) => {
@@ -539,9 +818,16 @@ export default function App() {
           <p>Local Path Editor</p>
         </div>
 
-        <button className="primary-btn" onClick={selectFolder}>
-          {projectDir ? 'Change Project Folder' : 'Open FRC Project'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+          <button className="primary-btn" style={{ flex: 1, padding: '0.5rem' }} onClick={selectFolder}>
+            {projectDir ? 'Change Project' : 'Open FRC Project'}
+          </button>
+          {projectDir && (
+            <button className="secondary-btn" style={{ flex: 1, padding: '0.5rem' }} onClick={selectBgImage}>
+              Set Field Image
+            </button>
+          )}
+        </div>
 
         {projectDir && (
           <div className="path-list">
@@ -581,10 +867,10 @@ export default function App() {
                 if (renamingPathName === p.name) {
                   return (
                     <li key={p.name} className="active" style={{ padding: '0.25rem 0.5rem' }}>
-                      <input 
+                      <input
                         className="rename-input"
                         autoFocus
-                        type="text" 
+                        type="text"
                         value={renameInputValue}
                         onChange={e => {
                           e.stopPropagation();
@@ -599,7 +885,7 @@ export default function App() {
                     </li>
                   );
                 }
-                
+
                 return (
                   <li key={p.name} className={p.name === currentPathName ? 'active' : ''} onClick={() => { setCurrentPathName(p.name); setSelectedIndex(null); }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>{p.name}.json {isD && '*'}</span>
@@ -613,9 +899,21 @@ export default function App() {
             </ul>
             {currentPathName && (
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="primary-btn" style={{ flex: 1, background: playbackState === 'playing' ? '#f59e0b' : '#10b981' }} onClick={playPause}>
+                    {playbackState === 'playing' ? 'Pause Ghost' : 'Play Ghost'}
+                  </button>
+                  <button className="secondary-btn" onClick={stopPlayback} disabled={playbackState === 'stopped'}>
+                    Stop
+                  </button>
+                </div>
                 <button className="primary-btn" style={{ width: '100%' }} onClick={addWaypoint}>
                   + Add Waypoint
                 </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="secondary-btn" style={{ flex: 1 }} onClick={flipX}>Flip X</button>
+                  <button className="secondary-btn" style={{ flex: 1 }} onClick={flipY}>Flip Y</button>
+                </div>
                 <button
                   className="primary-btn"
                   style={{ width: '100%', background: dirtyPaths.has(currentPathName) ? '#eab308' : '#3f3f46', color: dirtyPaths.has(currentPathName) ? '#000' : '#fff', opacity: dirtyPaths.has(currentPathName) ? 1 : 0.5 }}
@@ -674,6 +972,11 @@ export default function App() {
             <div className="input-group">
               <label>Early Exit Range (m)</label>
               <input type="number" step="0.1" value={selectedPoint.params?.earlyExitRange ?? ''} placeholder="Auto" onChange={(e) => updateSelectedPointParams('earlyExitRange', e.target.value ? parseFloat(e.target.value) : null)} />
+            </div>
+
+            <div className="input-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <input type="checkbox" id="interpolate-checkbox" checked={selectedPoint.params?.interpolate ?? false} onChange={(e) => updateSelectedPointParams('interpolate', e.target.checked)} style={{ width: 'auto' }} />
+              <label htmlFor="interpolate-checkbox" style={{ margin: 0, cursor: 'pointer' }}>Interpolate Heading</label>
             </div>
 
             <button className="danger-btn" onClick={deleteSelectedWaypoint}>
